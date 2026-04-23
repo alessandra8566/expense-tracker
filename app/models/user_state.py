@@ -9,6 +9,7 @@ from app.database import Base
 
 class StateEnum(str, enum.Enum):
     WAITING_INPUT = "WAITING_INPUT"
+    WAITING_PAYER = "WAITING_PAYER"
     WAITING_SPLIT_MODE = "WAITING_SPLIT_MODE"
     WAITING_CUSTOM_SPLIT = "WAITING_CUSTOM_SPLIT"
 

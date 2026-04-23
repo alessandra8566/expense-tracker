@@ -57,6 +57,37 @@ class LineBotService:
         await LineBotService._reply(reply_token, [TextMessage(text=text)])
 
     # ------------------------------------------------------------------ #
+    #  Payer selection (Me / Partner)
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    async def reply_payer_prompt(reply_token: str, description: str, amount: float):
+        text = (
+            f"📝 {description}　NT$ {amount:,.0f}\n"
+            "這筆錢是誰付的？ 👇"
+        )
+        quick_reply = QuickReply(
+            items=[
+                QuickReplyItem(
+                    action=PostbackAction(
+                        label="🙋 我付的",
+                        data="action=payer_me",
+                        display_text="我付的",
+                    )
+                ),
+                QuickReplyItem(
+                    action=PostbackAction(
+                        label="👤 對方付的",
+                        data="action=payer_partner",
+                        display_text="對方付的",
+                    )
+                ),
+            ]
+        )
+        await LineBotService._reply(
+            reply_token, [TextMessage(text=text, quick_reply=quick_reply)]
+        )
+
+    # ------------------------------------------------------------------ #
     #  Split mode selection  (AA / 自訂)
     # ------------------------------------------------------------------ #
     @staticmethod

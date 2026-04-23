@@ -87,8 +87,11 @@ jobs:
             set -e
             cd ~/expense-tracker
 
-            # Write production env file from GitHub secrets
-            cat > .env.prod <<EOF
+            # ── Sync nginx configs and compose files from repo ──────────────
+            git pull origin main || true
+
+            # ── Write production env file from GitHub secrets ───────────────
+            cat > .env.prod << 'EOF'
             LINE_CHANNEL_SECRET=${{ secrets.LINE_CHANNEL_SECRET }}
             LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
             POSTGRES_USER=${{ secrets.POSTGRES_USER }}
@@ -99,8 +102,17 @@ jobs:
             GITHUB_REPOSITORY=${{ github.repository }}
             EOF
 
-            # Pull latest image and redeploy
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            # ── Pull latest app image ───────────────────────────────────────
+            echo "${{ secrets.GITHUB_TOKEN }}" | \
+              docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            docker compose --env-file .env.prod -f docker-compose.prod.yml pull app
+
+            # ── Rolling restart (keeps nginx + certbot running) ─────────────
+            docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --remove-orphans
+
+            # ── Reload nginx in case config changed ─────────────────────────
+            docker exec expense_nginx nginx -s reload || true
+
+            # ── Cleanup old images ──────────────────────────────────────────
             docker image prune -f

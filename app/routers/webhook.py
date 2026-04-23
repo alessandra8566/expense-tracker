@@ -2,7 +2,8 @@
 LINE Webhook router — the single entry point for all LINE events.
 
 State transitions:
-  WAITING_INPUT      →  text "品項 金額"  →  WAITING_SPLIT_MODE
+  WAITING_INPUT      →  text "品項 金額"  →  WAITING_PAYER
+  WAITING_PAYER      →  postback Me/Partner →  WAITING_SPLIT_MODE
   WAITING_SPLIT_MODE →  postback AA       →  WAITING_INPUT  (save expense)
   WAITING_SPLIT_MODE →  postback custom   →  WAITING_CUSTOM_SPLIT
   WAITING_CUSTOM_SPLIT → text "我 200"   →  WAITING_INPUT  (save expense)
@@ -32,6 +33,11 @@ log = logging.getLogger(__name__)
 
 # Keywords that trigger the main menu
 MENU_KEYWORDS = {"選單", "menu", "Menu", "幫助", "help", "Help"}
+# Keywords for direct commands
+QUERY_KEYWORDS = {"查詢", "查詢結算", "結算", "query"}
+HISTORY_KEYWORDS = {"歷史", "歷史紀錄", "紀錄", "history"}
+CLEAR_KEYWORDS = {"清帳", "清除", "clear"}
+
 # Keywords that trigger invite-code generation
 PAIR_TRIGGER = re.compile(r"^配對$", re.IGNORECASE)
 # Keywords that trigger pairing with a code
@@ -88,14 +94,25 @@ async def _handle_text(event: MessageEvent, db: AsyncSession):
         await _handle_custom_split_input(event, db, user, user_state, text)
         return
 
-    # ── State: WAITING_SPLIT_MODE — user typed instead of tapping button ───
-    if user_state.state == StateEnum.WAITING_SPLIT_MODE:
-        await LineBotService.reply_text(reply_token, "請點選上方按鈕選擇分帳方式 👆")
+    # ── State: WAITING_PAYER / WAITING_SPLIT_MODE ─────────────────────────
+    if user_state.state in {StateEnum.WAITING_PAYER, StateEnum.WAITING_SPLIT_MODE}:
+        await LineBotService.reply_text(reply_token, "請點選上方按鈕完成記帳流程 👆")
         return
 
     # ── Menu keywords ───────────────────────────────────────────────────────
     if text in MENU_KEYWORDS:
         await LineBotService.reply_main_menu(reply_token)
+        return
+
+    # ── Direct commands ─────────────────────────────────────────────────────
+    if text in QUERY_KEYWORDS:
+        await _handle_query(event, db, user)
+        return
+    if text in HISTORY_KEYWORDS:
+        await _handle_history(event, db, user)
+        return
+    if text in CLEAR_KEYWORDS:
+        await LineBotService.reply_clear_confirm(reply_token)
         return
 
     # ── Pairing: "配對" (generate code) ────────────────────────────────────
@@ -119,14 +136,14 @@ async def _handle_text(event: MessageEvent, db: AsyncSession):
                 "⚠️ 你還沒有配對夥伴！\n\n請輸入「配對」來產生邀請碼。",
             )
             return
-        # Save pending and transition
+        # Save pending and transition to WAITING_PAYER
         await StateMachineService.transition(
             db,
             line_user_id,
-            StateEnum.WAITING_SPLIT_MODE,
+            StateEnum.WAITING_PAYER,
             {"description": description, "amount": str(amount)},
         )
-        await LineBotService.reply_split_prompt(reply_token, description, float(amount))
+        await LineBotService.reply_payer_prompt(reply_token, description, float(amount))
         return
 
     # ── Fallback: show menu ─────────────────────────────────────────────────
@@ -149,7 +166,11 @@ async def _handle_postback(event: PostbackEvent, db: AsyncSession):
     user = await ExpenseService.get_or_create_user(db, line_user_id, display_name)
     user_state = await StateMachineService.get_state(db, line_user_id)
 
-    if action == "split_aa":
+    if action == "payer_me":
+        await _handle_payer_select(event, db, user, user_state, "me")
+    elif action == "payer_partner":
+        await _handle_payer_select(event, db, user, user_state, "partner")
+    elif action == "split_aa":
         await _handle_split_aa(event, db, user, user_state)
     elif action == "split_custom":
         await _handle_split_custom_init(event, db, user, user_state)
@@ -171,6 +192,24 @@ async def _handle_postback(event: PostbackEvent, db: AsyncSession):
 #  Action handlers
 # ──────────────────────────────────────────────────────────────────────────────
 
+async def _handle_payer_select(event, db, user, user_state, payer_type):
+    reply_token = event.reply_token
+    if user_state.state != StateEnum.WAITING_PAYER or not user_state.pending_data:
+        await LineBotService.reply_text(reply_token, "⚠️ 請先輸入品項和金額。")
+        return
+
+    # Update pending data with payer info
+    pending_data = user_state.pending_data.copy()
+    pending_data["payer_type"] = payer_type
+
+    await StateMachineService.transition(
+        db, user.line_user_id, StateEnum.WAITING_SPLIT_MODE, pending_data
+    )
+    await LineBotService.reply_split_prompt(
+        reply_token, pending_data["description"], float(pending_data["amount"])
+    )
+
+
 async def _handle_split_aa(event, db, user, user_state):
     reply_token = event.reply_token
     if user_state.state != StateEnum.WAITING_SPLIT_MODE or not user_state.pending_data:
@@ -184,14 +223,25 @@ async def _handle_split_aa(event, db, user, user_state):
 
     description = user_state.pending_data["description"]
     amount = Decimal(user_state.pending_data["amount"])
+    payer_type = user_state.pending_data.get("payer_type", "me")
 
-    expense = await ExpenseService.add_expense_aa(db, user, partner, description, amount)
+    # Determine actual payer and partner
+    if payer_type == "me":
+        actual_payer, actual_partner = user, partner
+        payer_name = "你"
+        partner_name = partner.display_name
+    else:
+        actual_payer, actual_partner = partner, user
+        payer_name = partner.display_name
+        partner_name = "你"
+
+    expense = await ExpenseService.add_expense_aa(db, actual_payer, actual_partner, description, amount)
     await StateMachineService.reset(db, user.line_user_id)
 
     msg = SettlementService.format_expense_result(
         description, amount,
         expense.payer_share, expense.partner_share,
-        "你", partner.display_name,
+        payer_name, partner_name,
     )
     await LineBotService.reply_text(reply_token, msg)
 
@@ -218,6 +268,7 @@ async def _handle_custom_split_input(event, db, user, user_state, text):
 
     description = user_state.pending_data["description"]
     amount = Decimal(user_state.pending_data["amount"])
+    payer_type = user_state.pending_data.get("payer_type", "me")
 
     result = parse_custom_split(text, amount)
     if result is None:
@@ -228,21 +279,34 @@ async def _handle_custom_split_input(event, db, user, user_state, text):
         )
         return
 
-    payer_share, partner_share = result
+    mine_share, theirs_share = result
     partner = await ExpenseService.get_partner(db, user)
     if not partner:
         await LineBotService.reply_text(reply_token, "⚠️ 找不到配對夥伴，請重新配對。")
         return
 
+    # Determine actual shares and names based on who paid
+    if payer_type == "me":
+        # Current user is payer
+        actual_payer, actual_partner = user, partner
+        payer_share, partner_share = mine_share, theirs_share
+        payer_name, partner_name = "你", partner.display_name
+    else:
+        # Partner is payer
+        actual_payer, actual_partner = partner, user
+        # 'mine_share' is still what the current user (me) owes, so it's partner_share for the actual payer
+        payer_share, partner_share = theirs_share, mine_share
+        payer_name, partner_name = partner.display_name, "你"
+
     expense = await ExpenseService.add_expense_custom(
-        db, user, partner, description, amount, payer_share, partner_share
+        db, actual_payer, actual_partner, description, amount, payer_share, partner_share
     )
     await StateMachineService.reset(db, user.line_user_id)
 
     msg = SettlementService.format_expense_result(
         description, amount,
         expense.payer_share, expense.partner_share,
-        "你", partner.display_name,
+        payer_name, partner_name,
     )
     await LineBotService.reply_text(reply_token, msg)
 
