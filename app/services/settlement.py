@@ -63,14 +63,16 @@ class SettlementService:
         if net > 0:
             return (
                 f"💸 結算結果\n"
-                f"{'─' * 20}\n"
-                f"{partner_name} 共欠你 NT$ {net:,.0f} 元"
+                f"──────────\n"
+                f"🎯 {partner_name} 共欠你\n"
+                f"NT$ {net:,.0f}"
             )
         elif net < 0:
             return (
                 f"💸 結算結果\n"
-                f"{'─' * 20}\n"
-                f"你共欠 {partner_name} NT$ {abs(net):,.0f} 元"
+                f"──────────\n"
+                f"🎯 你共欠 {partner_name}\n"
+                f"NT$ {abs(net):,.0f}"
             )
         else:
             return "🎉 目前帳務已平衡，互不相欠！"
@@ -79,17 +81,22 @@ class SettlementService:
     def format_history(expenses: list, me_id) -> str:
         if not expenses:
             return "📋 目前沒有未結清的記錄。"
-        lines = ["📋 最近記帳紀錄（未結清）\n" + "─" * 20]
+            
+        header = "📋 最近未結清紀錄\n──────────"
+        items = []
         for exp in expenses:
-            who = "你付" if str(exp.payer_id) == str(me_id) else "對方付"
+            who = "你先付" if str(exp.payer_id) == str(me_id) else "對方付"
             mode = "AA" if exp.split_mode.value == "AA" else "自訂"
             ts = exp.created_at.strftime("%m/%d %H:%M")
-            lines.append(
-                f"{ts}  {exp.description}\n"
-                f"  總額 {exp.amount:,.0f}｜{who}｜{mode}分\n"
-                f"  你負擔 {exp.payer_share if str(exp.payer_id)==str(me_id) else exp.partner_share:,.0f}"
+            my_share = exp.payer_share if str(exp.payer_id)==str(me_id) else exp.partner_share
+            
+            items.append(
+                f"🔹 {ts} {exp.description}\n"
+                f"   總額 ${exp.amount:,.0f} ({who}/{mode})\n"
+                f"   👉 你負擔 ${my_share:,.0f}"
             )
-        return "\n\n".join(lines)
+            
+        return header + "\n" + "\n\n".join(items)
 
     @staticmethod
     def format_expense_result(
@@ -102,8 +109,8 @@ class SettlementService:
     ) -> str:
         return (
             f"✅ 已記帳：{description}\n"
-            f"{'─' * 20}\n"
-            f"總金額　NT$ {amount:,.0f}\n"
-            f"{payer_name}（你）　NT$ {payer_share:,.0f}\n"
-            f"{partner_name}　NT$ {partner_share:,.0f}"
+            f"──────────\n"
+            f"💰 總額：NT$ {amount:,.0f}\n"
+            f"👤 {payer_name}：NT$ {payer_share:,.0f}\n"
+            f"👤 {partner_name}：NT$ {partner_share:,.0f}"
         )
