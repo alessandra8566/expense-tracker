@@ -30,8 +30,8 @@ _EXPENSE_RE = re.compile(
 #   "我 200"          → mine=200
 #   "我200對方120"    → mine=200, theirs=120
 _CUSTOM_RE = re.compile(
-    r"(?:我\s*)?(?P<mine>[\d,]+(?:\.\d+)?)"
-    r"(?:\s*對方\s*(?P<theirs>[\d,]+(?:\.\d+)?))?",
+    r"^(?:我\s*)?(?P<mine>[\d,]+(?:\.\d+)?)"
+    r"(?:\s*對方\s*(?P<theirs>[\d,]+(?:\.\d+)?))?$",
     re.UNICODE,
 )
 
@@ -55,7 +55,7 @@ def parse_custom_split(text: str, total: Decimal) -> Optional[Tuple[Decimal, Dec
     Return (payer_share, partner_share) from custom split text, or None on error.
     Ensures payer_share + partner_share == total.
     """
-    m = _CUSTOM_RE.search(text.strip())
+    m = _CUSTOM_RE.match(text.strip())
     if not m:
         return None
     try:
