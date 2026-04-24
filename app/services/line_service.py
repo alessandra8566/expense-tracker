@@ -159,11 +159,10 @@ class LineBotService:
     @staticmethod
     async def reply_custom_split_prompt(reply_token: str, amount: float):
         text = (
-            f"✏️ 請輸入你要負擔的金額（總額 NT$ {amount:,.0f}）\n\n"
-            "格式範例：\n"
-            "  我 200　　　→ 你付 200，對方付其餘\n"
-            "  我 200 對方 120　→ 各自指定金額\n\n"
-            "「我」代表你自己，對方自動為剩餘金額。"
+            f"✏️ 請輸入「你」要負擔的金額\n"
+            f"( 總額 NT$ {amount:,.0f} )\n\n"
+            "直接輸入數字即可，例如：200\n"
+            "系統會自動計算對方的餘額。"
         )
         await LineBotService._reply(reply_token, [TextMessage(text=text)])
 
