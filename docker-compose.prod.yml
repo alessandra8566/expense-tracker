@@ -16,9 +16,10 @@ services:
   db:
     image: postgres:16-alpine
     container_name: expense_db
+    command: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./db/pg_hba.conf:/var/lib/postgresql/data/pg_hba.conf
+      - ./db/pg_hba.conf:/etc/postgresql/pg_hba.conf
     env_file:
       - .env.prod
     ports:
