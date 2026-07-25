@@ -51,6 +51,9 @@ jobs:
           APP_ENV: test
         run: pytest tests/ -v --cov=app --cov-report=term-missing
 
+      - name: Test Nginx security routing
+        run: ./scripts/test-nginx-security.sh
+
   # ──────────────────────────────────────────────────────────────
   #  2. Build & push Docker image (only on main branch push)
   # ──────────────────────────────────────────────────────────────
