@@ -37,6 +37,8 @@ MENU_KEYWORDS = {"選單", "menu", "Menu", "幫助", "help", "Help"}
 QUERY_KEYWORDS = {"查詢", "查詢結算", "結算", "query"}
 HISTORY_KEYWORDS = {"歷史", "歷史紀錄", "紀錄", "history"}
 CLEAR_KEYWORDS = {"清帳", "清除", "clear"}
+# Keywords that cancel an unfinished expense flow
+CANCEL_KEYWORDS = {"取消", "重來", "重新開始", "cancel", "reset"}
 
 # Keywords that trigger invite-code generation
 PAIR_TRIGGER = re.compile(r"^配對$", re.IGNORECASE)
@@ -89,14 +91,33 @@ async def _handle_text(event: MessageEvent, db: AsyncSession):
     user = await ExpenseService.get_or_create_user(db, line_user_id, display_name)
     user_state = await StateMachineService.get_state(db, line_user_id)
 
+    # Always provide an escape hatch, even if the quick reply disappeared.
+    if text in CANCEL_KEYWORDS:
+        await StateMachineService.reset(db, line_user_id)
+        await LineBotService.reply_main_menu(reply_token)
+        return
+
     # ── State: WAITING_CUSTOM_SPLIT ─────────────────────────────────────────
     if user_state.state == StateEnum.WAITING_CUSTOM_SPLIT:
         await _handle_custom_split_input(event, db, user, user_state, text)
         return
 
     # ── State: WAITING_PAYER / WAITING_SPLIT_MODE ─────────────────────────
-    if user_state.state in {StateEnum.WAITING_PAYER, StateEnum.WAITING_SPLIT_MODE}:
-        await LineBotService.reply_text(reply_token, "請點選上方按鈕完成記帳流程 👆")
+    # Quick replies are temporary in the LINE client. Re-send the relevant
+    # prompt when the user sends a message after the buttons have disappeared.
+    if user_state.state == StateEnum.WAITING_PAYER and user_state.pending_data:
+        await LineBotService.reply_payer_prompt(
+            reply_token,
+            user_state.pending_data["description"],
+            float(user_state.pending_data["amount"]),
+        )
+        return
+    if user_state.state == StateEnum.WAITING_SPLIT_MODE and user_state.pending_data:
+        await LineBotService.reply_split_prompt(
+            reply_token,
+            user_state.pending_data["description"],
+            float(user_state.pending_data["amount"]),
+        )
         return
 
     # ── Menu keywords ───────────────────────────────────────────────────────
@@ -136,14 +157,15 @@ async def _handle_text(event: MessageEvent, db: AsyncSession):
                 "⚠️ 你還沒有配對夥伴！\n\n請輸入「配對」來產生邀請碼。",
             )
             return
-        # Save pending and transition to WAITING_PAYER
+        # Send the prompt first. If LINE rejects the reply, do not persist a
+        # state that requires buttons the user never received.
+        await LineBotService.reply_payer_prompt(reply_token, description, float(amount))
         await StateMachineService.transition(
             db,
             line_user_id,
             StateEnum.WAITING_PAYER,
             {"description": description, "amount": str(amount)},
         )
-        await LineBotService.reply_payer_prompt(reply_token, description, float(amount))
         return
 
     # ── Fallback: show menu ─────────────────────────────────────────────────
@@ -202,11 +224,11 @@ async def _handle_payer_select(event, db, user, user_state, payer_type):
     pending_data = user_state.pending_data.copy()
     pending_data["payer_type"] = payer_type
 
-    await StateMachineService.transition(
-        db, user.line_user_id, StateEnum.WAITING_SPLIT_MODE, pending_data
-    )
     await LineBotService.reply_split_prompt(
         reply_token, pending_data["description"], float(pending_data["amount"])
+    )
+    await StateMachineService.transition(
+        db, user.line_user_id, StateEnum.WAITING_SPLIT_MODE, pending_data
     )
 
 
@@ -253,10 +275,10 @@ async def _handle_split_custom_init(event, db, user, user_state):
         return
 
     amount = Decimal(user_state.pending_data["amount"])
+    await LineBotService.reply_custom_split_prompt(reply_token, float(amount))
     await StateMachineService.transition(
         db, user.line_user_id, StateEnum.WAITING_CUSTOM_SPLIT, user_state.pending_data
     )
-    await LineBotService.reply_custom_split_prompt(reply_token, float(amount))
 
 
 async def _handle_custom_split_input(event, db, user, user_state, text):
