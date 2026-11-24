@@ -106,7 +106,7 @@ jobs:
             cd ~/expense-tracker
 
             # ── Sync nginx configs and compose files from repo ──────────────
-            git pull origin main || true
+            git pull origin main
 
             # ── Write production env file from GitHub secrets ───────────────
             cat > .env.prod << 'EOF'
@@ -120,17 +120,50 @@ jobs:
             GITHUB_REPOSITORY=${{ github.repository }}
             EOF
 
+            # Validate the production Compose configuration before changing services.
+            docker compose --env-file .env.prod -f docker-compose.prod.yml config --quiet
+
             # ── Pull latest app image ───────────────────────────────────────
             echo "${{ secrets.GITHUB_TOKEN }}" | \
               docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             docker compose --env-file .env.prod -f docker-compose.prod.yml pull app
 
-            # ── Rolling restart (keeps nginx + certbot running) ─────────────
+            # ── Rolling restart (keeps nginx running) ───────────────────────
             docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --remove-orphans
 
-            # ── Reload nginx in case config changed ─────────────────────────
-            docker exec expense_nginx nginx -s reload || true
+            # ── Wait for the restarted app to pass its health check ──────────
+            for attempt in $(seq 1 30); do
+              app_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' expense_app)
+              if [ "$app_health" = "healthy" ]; then
+                echo "Application health check passed"
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "Application failed to become healthy (status: $app_health)" >&2
+                exit 1
+              fi
+              sleep 2
+            done
+
+            # ── Reload nginx and verify HTTPS health through the proxy ───────
+            docker exec expense_nginx nginx -t
+            docker exec expense_nginx nginx -s reload
+
+            for attempt in $(seq 1 10); do
+              if printf 'GET /health HTTP/1.1\r\nHost: alessandra8566.com\r\nConnection: close\r\n\r\n' | \
+                openssl s_client -verify 5 -verify_return_error -verify_hostname alessandra8566.com \
+                  -connect 127.0.0.1:443 -servername alessandra8566.com -quiet 2>/dev/null | \
+                grep -q '"status":"ok"'; then
+                echo "HTTPS health check passed"
+                break
+              fi
+              if [ "$attempt" -eq 10 ]; then
+                echo "HTTPS health check failed after Nginx reload" >&2
+                exit 1
+              fi
+              sleep 2
+            done
 
             # ── Cleanup old images ──────────────────────────────────────────
             docker image prune -f

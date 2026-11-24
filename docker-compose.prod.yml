@@ -10,6 +10,12 @@ services:
     container_name: expense_app
     expose:
       - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import http.client; c = http.client.HTTPConnection('127.0.0.1', 8000, timeout=3); c.request('GET', '/health'); r = c.getresponse(); assert r.status == 200"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     env_file:
       - .env.prod
     depends_on:
@@ -63,6 +69,11 @@ services:
   certbot:
     image: certbot/certbot
     container_name: expense_certbot
+    # Share Nginx's PID namespace so the deploy hook can signal its master.
+    pid: "service:nginx"
+    depends_on:
+      nginx:
+        condition: service_started
     volumes:
       - /etc/letsencrypt:/etc/letsencrypt
       - certbot_www:/var/www/certbot
@@ -70,7 +81,7 @@ services:
     entrypoint: >
       /bin/sh -c "trap exit TERM;
       while :; do
-        certbot renew --webroot --webroot-path=/var/www/certbot --quiet;
+        certbot renew --webroot --webroot-path=/var/www/certbot --quiet --deploy-hook 'kill -HUP 1';
         sleep 12h & wait $${!};
       done"
     restart: unless-stopped
