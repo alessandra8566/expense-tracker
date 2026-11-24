@@ -217,7 +217,7 @@ class LineBotService:
             items.append(
                 QuickReplyItem(
                     action=PostbackAction(
-                        label=str(index),
+                        label=f"🗑️ {index}",
                         data=f"action=delete_expense&id={expense.id}",
                         display_text=f"刪除第 {index} 筆",
                     )
