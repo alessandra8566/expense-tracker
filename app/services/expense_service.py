@@ -7,8 +7,9 @@ import string
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Tuple, List
+from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -223,6 +224,44 @@ class ExpenseService:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    @staticmethod
+    async def get_recent_expenses(
+        db: AsyncSession, user: User, limit: int = 10
+    ) -> List[Expense]:
+        """Return the latest unsettled expenses involving this user."""
+        result = await db.execute(
+            select(Expense)
+            .where(
+                or_(Expense.payer_id == user.id, Expense.partner_id == user.id),
+                Expense.is_settled.is_(False),
+            )
+            .order_by(desc(Expense.created_at), desc(Expense.id))
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def delete_expense(
+        db: AsyncSession, user: User, expense_id: UUID
+    ) -> Optional[Expense]:
+        """Delete an expense only when it belongs to this user's shared ledger."""
+        result = await db.execute(
+            select(Expense)
+            .where(
+                Expense.id == expense_id,
+                or_(Expense.payer_id == user.id, Expense.partner_id == user.id),
+                Expense.is_settled.is_(False),
+            )
+            .with_for_update()
+        )
+        expense = result.scalar_one_or_none()
+        if expense is None:
+            return None
+
+        await db.delete(expense)
+        await db.flush()
+        return expense
 
     @staticmethod
     async def settle_all(db: AsyncSession, user: User) -> int:

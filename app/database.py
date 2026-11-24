@@ -27,10 +27,3 @@ async def get_db():
             yield session
         finally:
             await session.close()
-
-
-async def create_tables():
-    """Create all tables (used in dev / first-run)."""
-    from app.models import user, expense, user_state  # noqa: F401
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)

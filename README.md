@@ -55,6 +55,16 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
+### 資料庫遷移
+
+容器啟動時會先執行 `alembic upgrade head`，成功後才啟動 FastAPI。遷移設定在 `alembic.ini`，版本檔放在 `migrations/versions/`。要新增 schema 變更，先啟動本地資料庫，再從 repo 根目錄產生 migration：
+
+```bash
+POSTGRES_HOST=localhost alembic revision --autogenerate -m "describe schema change"
+```
+
+檢查並提交產生的 migration。不要修改已套用的舊版本檔。
+
 ---
 
 ## 對話流程
@@ -103,6 +113,7 @@ Bot：✅ 已成功與 使用者A 配對！
 ### 3️⃣ 系統管理
 *   **雙人配對**：透過邀請碼機制將兩位使用者連結。
 *   **清帳功能**：當雙方完成現實中的還款後，可將所有舊帳目一鍵歸零。
+*   **刪除品項**：輸入「刪除品項」，從最近 10 筆未結清記錄中選擇一筆刪除；選「取消」可返回功能選單。
 *   **功能選單**：輸入「選單」或「Help」可呼叫出功能按鈕，無需背誦指令。
 
 ### 指令對照表

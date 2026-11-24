@@ -11,6 +11,7 @@ State transitions:
 import re
 import logging
 from decimal import Decimal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from linebot.v3.exceptions import InvalidSignatureError
@@ -37,6 +38,7 @@ MENU_KEYWORDS = {"選單", "menu", "Menu", "幫助", "help", "Help"}
 QUERY_KEYWORDS = {"查詢", "查詢結算", "結算", "query"}
 HISTORY_KEYWORDS = {"歷史", "歷史紀錄", "紀錄", "history"}
 CLEAR_KEYWORDS = {"清帳", "清除", "clear"}
+DELETE_ITEMS_KEYWORD = "刪除品項"
 # Keywords that cancel an unfinished expense flow
 CANCEL_KEYWORDS = {"取消", "重來", "重新開始", "cancel", "reset"}
 
@@ -95,6 +97,11 @@ async def _handle_text(event: MessageEvent, db: AsyncSession):
     if text in CANCEL_KEYWORDS:
         await StateMachineService.reset(db, line_user_id)
         await LineBotService.reply_main_menu(reply_token)
+        return
+
+    if text == DELETE_ITEMS_KEYWORD:
+        await StateMachineService.reset(db, line_user_id)
+        await _handle_delete_items(reply_token, db, user)
         return
 
     # ── State: WAITING_CUSTOM_SPLIT ─────────────────────────────────────────
@@ -206,6 +213,13 @@ async def _handle_postback(event: PostbackEvent, db: AsyncSession):
         await _handle_clear(event, db, user)
     elif action == "clear_cancel":
         await LineBotService.reply_text(reply_token, "已取消清帳。")
+    elif action == "delete_items":
+        await StateMachineService.reset(db, line_user_id)
+        await _handle_delete_items(reply_token, db, user)
+    elif action == "delete_expense":
+        await _handle_delete_expense(reply_token, db, user, params.get("id", ""))
+    elif action == "delete_cancel":
+        await LineBotService.reply_main_menu(reply_token, "已取消刪除，回到功能選單 👇")
     else:
         await LineBotService.reply_main_menu(reply_token)
 
@@ -348,6 +362,35 @@ async def _handle_history(event, db, user):
     expenses = await ExpenseService.get_history(db, user)
     msg = SettlementService.format_history(expenses, user.id)
     await LineBotService.reply_text(reply_token, msg)
+
+
+async def _handle_delete_items(reply_token, db, user):
+    expenses = await ExpenseService.get_recent_expenses(db, user, limit=10)
+    await LineBotService.reply_delete_expense_prompt(reply_token, expenses, user.id)
+
+
+async def _handle_delete_expense(reply_token, db, user, expense_id_value):
+    try:
+        expense_id = UUID(expense_id_value)
+    except (TypeError, ValueError):
+        await LineBotService.reply_main_menu(
+            reply_token, "⚠️ 無法辨識這筆記錄，回到功能選單 👇"
+        )
+        return
+
+    async with db.begin_nested():
+        expense = await ExpenseService.delete_expense(db, user, expense_id)
+        if expense is None:
+            await LineBotService.reply_main_menu(
+                reply_token, "這筆記錄不存在、已結清或不屬於你的帳本，請重新操作。"
+            )
+            return
+
+        await LineBotService.reply_main_menu(
+            reply_token,
+            f"✅ 已刪除：{expense.description}　NT$ {expense.amount:,.2f}\n\n"
+            "回到功能選單 👇",
+        )
 
 
 async def _handle_clear(event, db, user):

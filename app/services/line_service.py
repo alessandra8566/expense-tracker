@@ -14,6 +14,7 @@ from linebot.v3.messaging import (
     PostbackAction,
 )
 from app.config import settings
+from app.models.expense import Expense
 
 # Re-export so webhook router can use it
 __all__ = ["LineBotService", "WebhookParser", "InvalidSignatureError"]
@@ -122,8 +123,9 @@ class LineBotService:
     #  Main menu
     # ------------------------------------------------------------------ #
     @staticmethod
-    async def reply_main_menu(reply_token: str):
-        text = "請選擇功能 👇\n\n💡 也可以直接輸入「品項 金額」來記帳\n例如：晚餐 320"
+    async def reply_main_menu(reply_token: str, text: str = ""):
+        if not text:
+            text = "請選擇功能 👇\n\n💡 也可以直接輸入「品項 金額」來記帳\n例如：晚餐 320"
         quick_reply = QuickReply(
             items=[
                 QuickReplyItem(
@@ -147,10 +149,68 @@ class LineBotService:
                         display_text="清帳",
                     )
                 ),
+                QuickReplyItem(
+                    action=PostbackAction(
+                        label="🗑️ 刪除品項",
+                        data="action=delete_items",
+                        display_text="刪除品項",
+                    )
+                ),
             ]
         )
         await LineBotService._reply(
             reply_token, [TextMessage(text=text, quick_reply=quick_reply)]
+        )
+
+    # ------------------------------------------------------------------ #
+    #  Recent expense deletion
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    async def reply_delete_expense_prompt(
+        reply_token: str, expenses: list[Expense], user_id
+    ):
+        if not expenses:
+            await LineBotService.reply_main_menu(
+                reply_token, "目前沒有未結清且可刪除的品項，回到功能選單 👇"
+            )
+            return
+
+        lines = [
+            f"🗑️ 最近 {len(expenses)} 筆未結清記錄",
+            "選擇編號即會刪除，這個動作無法復原。按「取消」可返回功能選單。",
+            "",
+        ]
+        items = []
+        for index, expense in enumerate(expenses, start=1):
+            timestamp = expense.created_at.strftime("%m/%d %H:%M")
+            description = " ".join(expense.description.split())
+            payer = "你先付" if str(expense.payer_id) == str(user_id) else "對方先付"
+            lines.append(
+                f"{index}. {timestamp} {description}\n"
+                f"   NT$ {expense.amount:,.2f}｜{payer}"
+            )
+            items.append(
+                QuickReplyItem(
+                    action=PostbackAction(
+                        label=str(index),
+                        data=f"action=delete_expense&id={expense.id}",
+                        display_text=f"刪除第 {index} 筆",
+                    )
+                )
+            )
+
+        items.append(
+            QuickReplyItem(
+                action=PostbackAction(
+                    label="取消",
+                    data="action=delete_cancel",
+                    display_text="取消",
+                )
+            )
+        )
+        await LineBotService._reply(
+            reply_token,
+            [TextMessage(text="\n".join(lines), quick_reply=QuickReply(items=items))],
         )
 
     # ------------------------------------------------------------------ #

@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database import create_tables
 from app.routers.webhook import router as webhook_router
 
 logging.basicConfig(
@@ -17,8 +16,6 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("Starting up — creating DB tables if needed...")
-    await create_tables()
     log.info("Ready ✅")
     yield
     log.info("Shutting down.")
