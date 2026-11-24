@@ -21,6 +21,18 @@ __all__ = ["LineBotService", "WebhookParser", "InvalidSignatureError"]
 
 parser = WebhookParser(settings.LINE_CHANNEL_SECRET)
 _configuration = Configuration(access_token=settings.LINE_CHANNEL_ACCESS_TOKEN)
+_DELETE_NUMBER_EMOJIS = (
+    "1️⃣",
+    "2️⃣",
+    "3️⃣",
+    "4️⃣",
+    "5️⃣",
+    "6️⃣",
+    "7️⃣",
+    "8️⃣",
+    "9️⃣",
+    "🔟",
+)
 
 
 class LineBotService:
@@ -177,27 +189,35 @@ class LineBotService:
 
         lines = [
             f"🗑️ 刪除品項｜最近 {len(expenses)} 筆未結清",
-            "選擇下方編號即可刪除（無法復原）",
-            "↩️ 按「取消」返回功能選單",
+            "選下方編號刪除（無法復原）",
+            "按「取消」返回功能選單",
             "",
         ]
         items = []
         for index, expense in enumerate(expenses, start=1):
             timestamp = expense.created_at.strftime("%m/%d %H:%M")
             description = " ".join(expense.description.split())
+            amount = f"{expense.amount:,.2f}".rstrip("0").rstrip(".")
             payer = (
                 "🙋 你先付"
                 if str(expense.payer_id) == str(user_id)
                 else "👤 對方先付"
             )
+            number_label = (
+                _DELETE_NUMBER_EMOJIS[index - 1]
+                if index <= len(_DELETE_NUMBER_EMOJIS)
+                else f"{index}."
+            )
+            if index > 1:
+                lines.append("")
             lines.append(
-                f"{index}. 🧾 {description}\n"
-                f"   🕒 {timestamp}　💵 NT$ {expense.amount:,.2f}　{payer}"
+                f"{number_label} {timestamp} {description}\n"
+                f"   總額 ${amount} {payer}"
             )
             items.append(
                 QuickReplyItem(
                     action=PostbackAction(
-                        label=f"🗑️ {index}",
+                        label=str(index),
                         data=f"action=delete_expense&id={expense.id}",
                         display_text=f"刪除第 {index} 筆",
                     )
@@ -207,7 +227,7 @@ class LineBotService:
         items.append(
             QuickReplyItem(
                 action=PostbackAction(
-                    label="↩️ 取消",
+                    label="取消",
                     data="action=delete_cancel",
                     display_text="取消",
                 )
