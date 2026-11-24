@@ -176,23 +176,28 @@ class LineBotService:
             return
 
         lines = [
-            f"🗑️ 最近 {len(expenses)} 筆未結清記錄",
-            "選擇編號即會刪除，這個動作無法復原。按「取消」可返回功能選單。",
+            f"🗑️ 刪除品項｜最近 {len(expenses)} 筆未結清",
+            "選擇下方編號即可刪除（無法復原）",
+            "↩️ 按「取消」返回功能選單",
             "",
         ]
         items = []
         for index, expense in enumerate(expenses, start=1):
             timestamp = expense.created_at.strftime("%m/%d %H:%M")
             description = " ".join(expense.description.split())
-            payer = "你先付" if str(expense.payer_id) == str(user_id) else "對方先付"
+            payer = (
+                "🙋 你先付"
+                if str(expense.payer_id) == str(user_id)
+                else "👤 對方先付"
+            )
             lines.append(
-                f"{index}. {timestamp} {description}\n"
-                f"   NT$ {expense.amount:,.2f}｜{payer}"
+                f"{index}. 🧾 {description}\n"
+                f"   🕒 {timestamp}　💵 NT$ {expense.amount:,.2f}　{payer}"
             )
             items.append(
                 QuickReplyItem(
                     action=PostbackAction(
-                        label=str(index),
+                        label=f"🗑️ {index}",
                         data=f"action=delete_expense&id={expense.id}",
                         display_text=f"刪除第 {index} 筆",
                     )
@@ -202,7 +207,7 @@ class LineBotService:
         items.append(
             QuickReplyItem(
                 action=PostbackAction(
-                    label="取消",
+                    label="↩️ 取消",
                     data="action=delete_cancel",
                     display_text="取消",
                 )
